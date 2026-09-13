@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSfL https://compressi.us/install-nightly.sh | sh
 
 REPO="${CMX_RELEASE_REPO:-administrakt0r/cmx}"
-VERSION="${CMX_VERSION:-v0.1.18-nightly.20260913162744.b8370c8eee3b}"
+VERSION="${CMX_VERSION:-v0.1.19-nightly.20260913171508.8e21d5566cd2}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
