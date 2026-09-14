@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'This installer requires Windows.' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$releaseVersion = 'v0.1.19-nightly.20260914070253.4c2d0c16a385'
+$releaseVersion = 'v0.1.20-nightly.20260914111432.38114ec2401e'
 if (!$Version) { $Version = $releaseVersion }
 if ($Version -notmatch '^v\d+\.\d+\.\d+(-nightly\.\d{14}\.[0-9a-f]+)?$') {
     throw 'Download a published CMX installer from https://compressi.us/install.ps1.'
