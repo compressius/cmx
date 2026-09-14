@@ -19,7 +19,7 @@ switch ($architecture.ToUpperInvariant()) {
     default { throw "Unsupported Windows architecture: $architecture. CMX requires x64 or ARM64." }
 }
 $asset = "cmx-windows-$arch.exe"
-$base = "https://github.com/administrakt0r/cmx/releases/download/$Version"
+$base = "https://github.com/compressius/cmx/releases/download/$Version"
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('cmx-install-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $scratch | Out-Null
 try {

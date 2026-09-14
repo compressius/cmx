@@ -4,7 +4,7 @@ set -e
 # CMX Install Script
 # Usage: curl -sSfL https://compressi.us/install.sh | sh
 
-REPO="${CMX_RELEASE_REPO:-administrakt0r/cmx}"
+REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
 VERSION="${CMX_VERSION:-latest}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
