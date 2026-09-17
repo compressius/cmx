@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSfL https://compressi.us/install-nightly.sh | sh
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.2.3-nightly.20260917004329.7a90ae5badfc}"
+VERSION="${CMX_VERSION:-v0.2.4-nightly.20260917010030.0ff414df309d}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
@@ -55,8 +55,16 @@ TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t 'cmx')"
 trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
 # Download
-echo "Downloading cmx-${OS}-${ARCH} from ${REPO} (${VERSION})..."
+echo "Downloading CMX ${VERSION} (${OS}/${ARCH})"
 DOWNLOAD_SUCCESS=0
+
+curl_download() {
+  if [ -t 2 ]; then
+    curl --fail --show-error --location --progress-bar "$@"
+  else
+    curl --fail --silent --show-error --location "$@"
+  fi
+}
 
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   if [ "$VERSION" = "latest" ]; then
@@ -73,11 +81,11 @@ fi
 if [ "$DOWNLOAD_SUCCESS" -ne 1 ]; then
   if command -v curl >/dev/null 2>&1; then
     if [ -n "${GITHUB_TOKEN:-}" ]; then
-      if curl -sSfL -H "Authorization: token ${GITHUB_TOKEN}" -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL"; then
+      if curl_download -H "Authorization: token ${GITHUB_TOKEN}" -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL"; then
         DOWNLOAD_SUCCESS=1
       fi
     else
-      if curl -sSfL -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL"; then
+      if curl_download -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL"; then
         DOWNLOAD_SUCCESS=1
       fi
     fi
@@ -99,12 +107,8 @@ if [ "$DOWNLOAD_SUCCESS" -ne 1 ]; then
   exit 1
 fi
 
-# This is a truthful terminal-native progress result: it reports bytes that
-# were actually written, without a spinner, timer-derived percentage, or a
-# continuously redrawn progress bar. It is equally safe when stdout is piped.
 DOWNLOADED_BYTES="$(wc -c < "${TMP_DIR}/cmx" | tr -d '[:space:]')"
 echo "Downloaded ${DOWNLOADED_BYTES} bytes."
-echo "Verifying release checksum..."
 
 # Verify the downloaded artifact against the release checksum before executing it.
 CHECKSUM_URL="https://github.com/${REPO}/releases/download/${VERSION}/SHA256SUMS"
@@ -153,25 +157,13 @@ fi
 CMX_VERSION_STR="$("${TMP_DIR}/cmx" --version)"
 
 # Install
-echo "Installing verified binary..."
 if [ -w "$INSTALL_DIR" ]; then
   mv "${TMP_DIR}/cmx" "${INSTALL_DIR}/cmx"
 else
-  echo "Installing to ${INSTALL_DIR} (requires sudo)..."
   sudo mv "${TMP_DIR}/cmx" "${INSTALL_DIR}/cmx"
 fi
 
-echo ""
-echo "✓ ${CMX_VERSION_STR} installed to ${INSTALL_DIR}/cmx"
-echo ""
-
-case ":$PATH:" in
-  *:"$INSTALL_DIR":*) ;;
-  *) echo "Notice: ${INSTALL_DIR} is not in your PATH. Add it to your ~/.bashrc or ~/.zshrc:"
-     echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
-     echo ""
-     ;;
-esac
+echo "✓ CMX ${CMX_VERSION_STR#cmx version } ready — run: ${INSTALL_DIR}/cmx"
 
 if [ "${CMX_SKIP_START:-0}" != "1" ]; then
   if ! "${INSTALL_DIR}/cmx" setup; then
