@@ -58,7 +58,26 @@ trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 echo "Downloading cmx-${OS}-${ARCH} from ${REPO} (${VERSION})..."
 DOWNLOAD_SUCCESS=0
 
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+# Interactive terminals get curl's transfer bar; piped output stays plain.
+curl_download() {
+  if [ -t 2 ]; then
+    curl --fail --show-error --location --progress-bar "$@"
+  else
+    curl --fail --silent --show-error --location "$@"
+  fi
+}
+
+# Prefer the visible transfer over gh's silent release download when attached
+# to a terminal, so the user always sees download progress.
+if [ -t 2 ] && command -v curl >/dev/null 2>&1; then
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    curl_download -H "Authorization: token ${GITHUB_TOKEN}" -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
+  else
+    curl_download -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
+  fi
+fi
+
+if [ "$DOWNLOAD_SUCCESS" -ne 1 ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   if [ "$VERSION" = "latest" ]; then
     if gh release download -p "cmx-${OS}-${ARCH}" -O "${TMP_DIR}/cmx" --repo "$REPO" >/dev/null 2>&1; then
       DOWNLOAD_SUCCESS=1
@@ -73,11 +92,11 @@ fi
 if [ "$DOWNLOAD_SUCCESS" -ne 1 ]; then
   if command -v curl >/dev/null 2>&1; then
     if [ -n "${GITHUB_TOKEN:-}" ]; then
-      if curl -sSfL -H "Authorization: token ${GITHUB_TOKEN}" -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL"; then
+      if curl_download -H "Authorization: token ${GITHUB_TOKEN}" -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL"; then
         DOWNLOAD_SUCCESS=1
       fi
     else
-      if curl -sSfL -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL"; then
+      if curl_download -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL"; then
         DOWNLOAD_SUCCESS=1
       fi
     fi
