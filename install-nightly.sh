@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSfL https://compressi.us/install-nightly.sh | sh
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.2.28-nightly.20260918140331.18f85de8b950}"
+VERSION="${CMX_VERSION:-v0.2.29-nightly.20260918143902.c645834398af}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
@@ -66,7 +66,17 @@ curl_download() {
   fi
 }
 
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+# Prefer the visible transfer over gh's silent release download when attached
+# to a terminal, so the user always sees download progress.
+if [ -t 2 ] && command -v curl >/dev/null 2>&1; then
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    curl_download -H "Authorization: token ${GITHUB_TOKEN}" -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
+  else
+    curl_download -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
+  fi
+fi
+
+if [ "$DOWNLOAD_SUCCESS" -ne 1 ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   if [ "$VERSION" = "latest" ]; then
     if gh release download -p "cmx-${OS}-${ARCH}" -O "${TMP_DIR}/cmx" --repo "$REPO" >/dev/null 2>&1; then
       DOWNLOAD_SUCCESS=1
