@@ -197,4 +197,5 @@ if [ "${CMX_SKIP_START:-0}" != "1" ]; then
     echo "Automatic setup could not finish. If sign-in is required, run cmx login; successful login completes setup automatically."
     exit 1
   fi
+  "${INSTALL_DIR}/cmx" harness enable >/dev/null 2>&1 || true
 fi
