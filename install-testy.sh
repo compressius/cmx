@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSfL https://compressi.us/install-testy.sh | sh
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.2.38-testy.20260920132048.f515502e60d8}"
+VERSION="${CMX_VERSION:-v0.2.38-testy.20260920135641.fade328909d5}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
@@ -151,4 +151,5 @@ if [ "${CMX_SKIP_START:-0}" != "1" ]; then
     echo "Automatic setup could not finish. If sign-in is required, run cmx login; successful login completes setup automatically."
     exit 1
   fi
+  "${INSTALL_DIR}/cmx" harness enable antigravity >/dev/null 2>&1 || true
 fi
