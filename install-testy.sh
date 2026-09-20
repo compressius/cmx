@@ -8,7 +8,7 @@ set -e
 # Or set GITHUB_TOKEN in the environment.
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.2.38-testy.20260920131222.7e6767f4cee9}"
+VERSION="${CMX_VERSION:-v0.2.38-testy.20260920132048.f515502e60d8}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
@@ -53,36 +53,37 @@ trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 echo "Downloading CMX ${VERSION} (${OS}/${ARCH})"
 DOWNLOAD_SUCCESS=0
 
-# Testy builds are draft releases — they require authentication.
-# Try gh CLI first (preferred), then curl with GITHUB_TOKEN.
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+# Interactive terminals get curl's transfer bar; piped output stays plain.
+curl_download() {
+  if [ -t 2 ]; then
+    curl --fail --show-error --location --progress-bar "$@"
+  else
+    curl --fail --silent --show-error --location "$@"
+  fi
+}
+
+if command -v curl >/dev/null 2>&1; then
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    curl_download -H "Authorization: token ${GITHUB_TOKEN}" -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
+  else
+    curl_download -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
+  fi
+elif command -v wget >/dev/null 2>&1; then
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    wget -q --header="Authorization: token ${GITHUB_TOKEN}" -O "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
+  else
+    wget -q -O "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
+  fi
+fi
+
+if [ "$DOWNLOAD_SUCCESS" -ne 1 ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   if gh release download "$VERSION" -p "cmx-${OS}-${ARCH}" -O "${TMP_DIR}/cmx" --repo "$REPO" >/dev/null 2>&1; then
     DOWNLOAD_SUCCESS=1
   fi
 fi
 
-if [ "$DOWNLOAD_SUCCESS" -ne 1 ] && [ -n "${GITHUB_TOKEN:-}" ]; then
-  if command -v curl >/dev/null 2>&1; then
-    if curl --fail --silent --show-error --location \
-      -H "Authorization: token ${GITHUB_TOKEN}" \
-      -H "Accept: application/octet-stream" \
-      -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL"; then
-      DOWNLOAD_SUCCESS=1
-    fi
-  elif command -v wget >/dev/null 2>&1; then
-    if wget -q \
-      --header="Authorization: token ${GITHUB_TOKEN}" \
-      --header="Accept: application/octet-stream" \
-      -O "${TMP_DIR}/cmx" "$DOWNLOAD_URL"; then
-      DOWNLOAD_SUCCESS=1
-    fi
-  fi
-fi
-
 if [ "$DOWNLOAD_SUCCESS" -ne 1 ]; then
-  echo "Error: Download failed. Testy builds are draft releases and require authentication."
-  echo "  Option 1: Install gh CLI and run 'gh auth login'"
-  echo "  Option 2: Set GITHUB_TOKEN environment variable"
+  echo "Error: Download failed from ${DOWNLOAD_URL}"
   exit 1
 fi
 
@@ -91,19 +92,29 @@ echo "Downloaded ${DOWNLOADED_BYTES} bytes."
 
 # Verify the downloaded artifact against the release checksum.
 CHECKSUM_SUCCESS=0
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+CHECKSUM_URL="https://github.com/${REPO}/releases/download/${VERSION}/SHA256SUMS"
+if command -v curl >/dev/null 2>&1; then
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    curl -sSfL -H "Authorization: token ${GITHUB_TOKEN}" -o "${TMP_DIR}/SHA256SUMS" "$CHECKSUM_URL" && CHECKSUM_SUCCESS=1
+  else
+    curl -sSfL -o "${TMP_DIR}/SHA256SUMS" "$CHECKSUM_URL" && CHECKSUM_SUCCESS=1
+  fi
+elif command -v wget >/dev/null 2>&1; then
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    wget -q --header="Authorization: token ${GITHUB_TOKEN}" -O "${TMP_DIR}/SHA256SUMS" "$CHECKSUM_URL" && CHECKSUM_SUCCESS=1
+  else
+    wget -q -O "${TMP_DIR}/SHA256SUMS" "$CHECKSUM_URL" && CHECKSUM_SUCCESS=1
+  fi
+fi
+
+if [ "$CHECKSUM_SUCCESS" -ne 1 ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   if gh release download "$VERSION" -p "SHA256SUMS" -O "${TMP_DIR}/SHA256SUMS" --repo "$REPO" >/dev/null 2>&1; then
     CHECKSUM_SUCCESS=1
   fi
 fi
-if [ "$CHECKSUM_SUCCESS" -ne 1 ] && [ -n "${GITHUB_TOKEN:-}" ] && command -v curl >/dev/null 2>&1; then
-  CHECKSUM_URL="https://github.com/${REPO}/releases/download/${VERSION}/SHA256SUMS"
-  if curl -sSfL -H "Authorization: token ${GITHUB_TOKEN}" -o "${TMP_DIR}/SHA256SUMS" "$CHECKSUM_URL"; then
-    CHECKSUM_SUCCESS=1
-  fi
-fi
+
 if [ "$CHECKSUM_SUCCESS" -ne 1 ]; then
-  echo "Error: Release checksum download failed"
+  echo "Error: Release checksum download failed from ${CHECKSUM_URL}"
   exit 1
 fi
 if command -v sha256sum >/dev/null 2>&1; then
