@@ -3,9 +3,6 @@ set -e
 
 # CMX Testy Install Script (linux/amd64 only)
 # Usage: curl -sSfL https://compressi.us/install-testy.sh | sh
-#
-# Requires: gh auth login (draft releases need authentication)
-# Or set GITHUB_TOKEN in the environment.
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
 VERSION="${CMX_VERSION:-v0.2.38-testy.20260920132048.f515502e60d8}"
