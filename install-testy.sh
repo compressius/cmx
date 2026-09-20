@@ -8,7 +8,7 @@ set -e
 # Or set GITHUB_TOKEN in the environment.
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.2.38-testy.20260920070644.7e2bbaacc1e4}"
+VERSION="${CMX_VERSION:-v0.2.38-testy.20260920074428.7701351b4e55}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
