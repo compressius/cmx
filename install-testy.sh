@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSfL https://compressi.us/install-testy.sh | sh
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.2.40-testy.20260923090136.49911323c951}"
+VERSION="${CMX_VERSION:-v0.2.40-testy.20260923211155.6a5e9efaf91e}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
@@ -117,13 +117,19 @@ fi
 if command -v sha256sum >/dev/null 2>&1; then
   expected="$(grep "  cmx-${OS}-${ARCH}$" "${TMP_DIR}/SHA256SUMS" | awk '{print $1}')"
   actual="$(sha256sum "${TMP_DIR}/cmx" | awk '{print $1}')"
-  [ -n "$expected" ] && [ "$expected" = "$actual" ]
 elif command -v shasum >/dev/null 2>&1; then
   expected="$(grep "  cmx-${OS}-${ARCH}$" "${TMP_DIR}/SHA256SUMS" | awk '{print $1}')"
   actual="$(shasum -a 256 "${TMP_DIR}/cmx" | awk '{print $1}')"
-  [ -n "$expected" ] && [ "$expected" = "$actual" ]
 else
   echo "Error: sha256sum or shasum is required to verify the release"
+  exit 1
+fi
+if [ -z "$expected" ]; then
+  echo "Error: Release checksum is missing for cmx-${OS}-${ARCH}"
+  exit 1
+fi
+if [ "$expected" != "$actual" ]; then
+  echo "Error: Checksum mismatch. Nothing was installed."
   exit 1
 fi
 
