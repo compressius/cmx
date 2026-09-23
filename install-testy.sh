@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSfL https://compressi.us/install-testy.sh | sh
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.2.39-testy.20260922183042.94cc6d7c9d2f}"
+VERSION="${CMX_VERSION:-v0.2.40-testy.20260923085337.0900cd8db958}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
@@ -147,9 +147,13 @@ fi
 echo "✓ CMX ${CMX_VERSION_STR#cmx version } ready — run: ${INSTALL_DIR}/cmx"
 
 if [ "${CMX_SKIP_START:-0}" != "1" ]; then
-  if ! "${INSTALL_DIR}/cmx" setup; then
+  if ! "${INSTALL_DIR}/cmx" setup --connect-ready; then
     echo "Automatic setup could not finish. If sign-in is required, run cmx login; successful login completes setup automatically."
     exit 1
   fi
-  "${INSTALL_DIR}/cmx" harness enable >/dev/null 2>&1 || true
+  if ! "${INSTALL_DIR}/cmx" harness verify; then
+    "${INSTALL_DIR}/cmx" stop || true
+    echo "Automatic configuration was rolled back because the CMX gateway was unavailable."
+    exit 1
+  fi
 fi
