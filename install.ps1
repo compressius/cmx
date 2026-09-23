@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'This installer requires Windows.' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$releaseVersion = 'v0.2.39'
+$releaseVersion = 'v0.2.40'
 if (!$Version) { $Version = $releaseVersion }
 if ($Version -notmatch '^v\d+\.\d+\.\d+(-nightly\.\d{14}\.[0-9a-f]+)?$') {
     throw 'Download a published CMX installer from https://compressi.us/install.ps1.'
@@ -26,12 +26,24 @@ try {
     Write-Progress -Activity "Installing CMX $Version" -Status 'Downloading' -PercentComplete 10
     $candidate = Join-Path $scratch $asset
     Invoke-WebRequest -UseBasicParsing "$base/$asset" -OutFile $candidate
-    $sums = (Invoke-WebRequest -UseBasicParsing "$base/SHA256SUMS").Content
-    $pattern = '(?m)^([a-fA-F0-9]{64})\s+\*?' + [Regex]::Escape($asset) + '\r?$'
-    $match = [Regex]::Match($sums, $pattern)
-    if (!$match.Success) { throw 'Release checksum is missing.' }
+    $sumsPath = Join-Path $scratch 'SHA256SUMS'
+    Invoke-WebRequest -UseBasicParsing "$base/SHA256SUMS" -OutFile $sumsPath
+    # GitHub serves release assets as application/octet-stream. Windows
+    # PowerShell returns that body as a byte[] from Invoke-WebRequest.Content
+    # (coerced to "System.Byte[]" for [Regex]::Match), so the checksum entry
+    # was never found. Read raw bytes and parse lines explicitly instead.
+    $sums = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($sumsPath)).TrimStart([char]0xFEFF)
+    $expected = $null
+    foreach ($line in ($sums -split "\r?\n")) {
+        if ($line -match '^\s*([a-fA-F0-9]{64})\s+\*?(.+?)\s*$' -and $Matches[2] -eq $asset) {
+            $expected = $Matches[1]
+            break
+        }
+    }
+    if ($null -eq $expected) { throw "Release checksum is missing for $asset." }
     Write-Progress -Activity "Installing CMX $Version" -Status 'Verifying SHA-256' -PercentComplete 65
-    if ((Get-FileHash $candidate -Algorithm SHA256).Hash -ne $match.Groups[1].Value) {
+    $actual = (Get-FileHash $candidate -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $expected.ToLowerInvariant()) {
         throw 'Checksum mismatch. Nothing was installed.'
     }
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
@@ -66,8 +78,13 @@ try {
     Write-Host "Installed to $target" -ForegroundColor Green
     Write-Host 'Open CMX from the Start menu, or type cmx in a new terminal.'
     if (!$SkipSetup) {
-        & $target setup
+        & $target setup --connect-ready
         if ($LASTEXITCODE -ne 0) { throw 'CMX is installed, but setup needs attention. Run cmx setup to retry.' }
+        & $target harness verify
+        if ($LASTEXITCODE -ne 0) {
+            & $target stop | Out-Null
+            throw 'Automatic configuration was rolled back because the CMX gateway was unavailable.'
+        }
     }
     Write-Host 'Next: cmx status | cmx setup | cmx help'
 } finally {
