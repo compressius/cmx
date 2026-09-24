@@ -199,7 +199,7 @@ case ":$PATH:" in
 esac
 
 if [ "${CMX_SKIP_START:-0}" != "1" ]; then
-  if ! "${INSTALL_DIR}/cmx" setup --connect-ready; then
+  if ! "${INSTALL_DIR}/cmx" setup --ask-connect-ready; then
     echo "Automatic setup could not finish. If sign-in is required, run cmx login; successful login completes setup automatically."
     exit 1
   fi
