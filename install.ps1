@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'This installer requires Windows.' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$releaseVersion = 'v0.2.40'
+$releaseVersion = 'v0.2.41'
 if (!$Version) { $Version = $releaseVersion }
 if ($Version -notmatch '^v\d+\.\d+\.\d+(-nightly\.\d{14}\.[0-9a-f]+)?$') {
     throw 'Download a published CMX installer from https://compressi.us/install.ps1.'
@@ -78,7 +78,7 @@ try {
     Write-Host "Installed to $target" -ForegroundColor Green
     Write-Host 'Open CMX from the Start menu, or type cmx in a new terminal.'
     if (!$SkipSetup) {
-        & $target setup --connect-ready
+        & $target setup --ask-connect-ready
         if ($LASTEXITCODE -ne 0) { throw 'CMX is installed, but setup needs attention. Run cmx setup to retry.' }
         & $target harness verify
         if ($LASTEXITCODE -ne 0) {
