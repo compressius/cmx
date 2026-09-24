@@ -20,4 +20,4 @@ The `latest` npm tag tracks stable CMX releases. Each package downloads the matc
 
 CMX is distributed under the Proprietary Gratis License. See `LICENSE` for the exact terms.
 
-This repository distributes the installers and compiled releases. Application source and build tooling are maintained separately. Only `install.sh`, `install.ps1`, `install-testy.sh`, `install-nightly.sh`, `install-nightly.ps1`, `README.md`, and `LICENSE` belong in its Git tree.
+This repository distributes official installers and compiled releases. Application source and build tooling are maintained separately.
