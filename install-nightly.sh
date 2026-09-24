@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSfL https://compressi.us/install-nightly.sh | sh
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.2.42-nightly.20260919161134.ef7b2d660264}"
+VERSION="${CMX_VERSION:-v0.2.43-nightly.20260924001945.2c6129b4c083}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
@@ -146,13 +146,19 @@ fi
 if command -v sha256sum >/dev/null 2>&1; then
   expected="$(grep "  cmx-${OS}-${ARCH}$" "${TMP_DIR}/SHA256SUMS" | awk '{print $1}')"
   actual="$(sha256sum "${TMP_DIR}/cmx" | awk '{print $1}')"
-  [ -n "$expected" ] && [ "$expected" = "$actual" ]
 elif command -v shasum >/dev/null 2>&1; then
   expected="$(grep "  cmx-${OS}-${ARCH}$" "${TMP_DIR}/SHA256SUMS" | awk '{print $1}')"
   actual="$(shasum -a 256 "${TMP_DIR}/cmx" | awk '{print $1}')"
-  [ -n "$expected" ] && [ "$expected" = "$actual" ]
 else
   echo "Error: sha256sum or shasum is required to verify the release"
+  exit 1
+fi
+if [ -z "$expected" ]; then
+  echo "Error: Release checksum is missing for cmx-${OS}-${ARCH}"
+  exit 1
+fi
+if [ "$expected" != "$actual" ]; then
+  echo "Error: Checksum mismatch. Nothing was installed."
   exit 1
 fi
 
@@ -176,8 +182,13 @@ fi
 echo "✓ CMX ${CMX_VERSION_STR#cmx version } ready — run: ${INSTALL_DIR}/cmx"
 
 if [ "${CMX_SKIP_START:-0}" != "1" ]; then
-  if ! "${INSTALL_DIR}/cmx" setup; then
+  if ! "${INSTALL_DIR}/cmx" setup --ask-connect-ready; then
     echo "Automatic setup could not finish. If sign-in is required, run cmx login; successful login completes setup automatically."
+    exit 1
+  fi
+  if ! "${INSTALL_DIR}/cmx" harness verify; then
+    "${INSTALL_DIR}/cmx" stop || true
+    echo "Automatic configuration was rolled back because the CMX gateway was unavailable."
     exit 1
   fi
 fi
