@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSfL https://compressi.us/install-testy.sh | sh
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.2.44-testy.20260929193448.9117ace44197}"
+VERSION="${CMX_VERSION:-v0.2.44-testy.20260929210000.6884b09c9b59}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
@@ -187,6 +187,9 @@ configure_shell_path() {
   if [ -f "$HOME/.zshrc" ]; then
     targets="$targets $HOME/.zshrc"
   fi
+  if [ -f "$HOME/.profile" ]; then
+    targets="$targets $HOME/.profile"
+  fi
 
   if [ -z "$targets" ]; then
     if [ "$user_shell" = "zsh" ]; then
@@ -259,9 +262,27 @@ configure_shell_path
 
 
 if [ "${CMX_SKIP_START:-0}" != "1" ]; then
-  if ! "${INSTALL_DIR}/cmx" setup --ask-connect-ready; then
+  setup_flag="--ask-connect-ready"
+  if [ ! -t 0 ] || [ ! -t 1 ]; then
+    setup_flag="--connect-ready"
+  fi
+  if ! "${INSTALL_DIR}/cmx" setup $setup_flag; then
     echo "Automatic setup could not finish. If sign-in is required, run cmx login; successful login completes setup automatically."
     exit 1
+  fi
+  # Ensure update.channel is set to testy
+  config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/cmx"
+  if [ -f "${config_dir}/config.json" ]; then
+    if command -v jq >/dev/null 2>&1; then
+      tmp_cfg="$(mktemp)"
+      jq '.update.channel = "testy"' "${config_dir}/config.json" > "$tmp_cfg" 2>/dev/null && mv "$tmp_cfg" "${config_dir}/config.json" || rm -f "$tmp_cfg"
+    elif command -v sed >/dev/null 2>&1; then
+      sed -i 's/"channel":[[:space:]]*"[^"]*"/"channel": "testy"/g' "${config_dir}/config.json" 2>/dev/null || true
+    fi
+  fi
+  # Install systemd user autostart service if systemd is available
+  if [ "$(uname -s)" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
+    "${INSTALL_DIR}/cmx" service install 2>/dev/null || true
   fi
   if ! "${INSTALL_DIR}/cmx" harness verify; then
     "${INSTALL_DIR}/cmx" stop || true

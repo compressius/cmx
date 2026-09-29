@@ -225,6 +225,9 @@ configure_shell_path() {
   if [ -f "$HOME/.zshrc" ]; then
     targets="$targets $HOME/.zshrc"
   fi
+  if [ -f "$HOME/.profile" ]; then
+    targets="$targets $HOME/.profile"
+  fi
 
   if [ -z "$targets" ]; then
     if [ "$user_shell" = "zsh" ]; then
@@ -297,9 +300,17 @@ configure_shell_path
 
 
 if [ "${CMX_SKIP_START:-0}" != "1" ]; then
-  if ! "${INSTALL_DIR}/cmx" setup --ask-connect-ready; then
-    echo "Automatic setup could not finish. Run cmx setup --ask-connect-ready in an interactive terminal to retry."
+  setup_flag="--ask-connect-ready"
+  if [ ! -t 0 ] || [ ! -t 1 ]; then
+    setup_flag="--connect-ready"
+  fi
+  if ! "${INSTALL_DIR}/cmx" setup $setup_flag; then
+    echo "Automatic setup could not finish. Run cmx setup in an interactive terminal to retry."
     exit 1
+  fi
+  # Install systemd user autostart service if systemd is available
+  if [ "$(uname -s)" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
+    "${INSTALL_DIR}/cmx" service install 2>/dev/null || true
   fi
   if ! "${INSTALL_DIR}/cmx" harness verify; then
     "${INSTALL_DIR}/cmx" stop || true
