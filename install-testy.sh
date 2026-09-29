@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSfL https://compressi.us/install-testy.sh | sh
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.2.42-testy.20260929133041.839cd1fc476e}"
+VERSION="${CMX_VERSION:-v0.2.44-testy.20260929193448.9117ace44197}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
@@ -151,6 +151,112 @@ else
 fi
 
 echo "✓ CMX ${CMX_VERSION_STR#cmx version } ready — run: ${INSTALL_DIR}/cmx"
+
+configure_shell_path() {
+  if [ "${CMX_NO_MODIFY_PATH:-0}" = "1" ]; then
+    return 0
+  fi
+
+  case ":$PATH:" in
+    *:"$INSTALL_DIR":*)
+      return 0
+      ;;
+  esac
+
+  if [ -z "$HOME" ]; then
+    return 0
+  fi
+
+  case "$INSTALL_DIR" in
+    "$HOME"/*)
+      dir_expr="\$HOME/${INSTALL_DIR#$HOME/}"
+      dir_display="~/${INSTALL_DIR#$HOME/}"
+      ;;
+    *)
+      dir_expr="$INSTALL_DIR"
+      dir_display="$INSTALL_DIR"
+      ;;
+  esac
+
+  user_shell="$(basename "${SHELL:-bash}")"
+  targets=""
+
+  if [ -f "$HOME/.bashrc" ]; then
+    targets="$targets $HOME/.bashrc"
+  fi
+  if [ -f "$HOME/.zshrc" ]; then
+    targets="$targets $HOME/.zshrc"
+  fi
+
+  if [ -z "$targets" ]; then
+    if [ "$user_shell" = "zsh" ]; then
+      targets="$HOME/.zshrc"
+    elif [ -f "$HOME/.bash_profile" ]; then
+      targets="$HOME/.bash_profile"
+    elif [ -f "$HOME/.profile" ]; then
+      targets="$HOME/.profile"
+    else
+      targets="$HOME/.bashrc"
+    fi
+  fi
+
+  configured_any=0
+  for target_file in $targets; do
+    if [ -f "$target_file" ] && (grep -F -q "$INSTALL_DIR" "$target_file" 2>/dev/null || \
+       grep -F -q "$dir_expr" "$target_file" 2>/dev/null || \
+       grep -F -q "Added by CMX" "$target_file" 2>/dev/null); then
+      continue
+    fi
+
+    mkdir -p "$(dirname "$target_file")"
+    {
+      printf '\n# Added by CMX\n'
+      printf 'if [ -d "%s" ] ; then\n' "$dir_expr"
+      printf '    PATH="%s:$PATH"\n' "$dir_expr"
+      printf 'fi\n'
+    } >> "$target_file"
+
+    case "$target_file" in
+      "$HOME"/*) target_display="~/${target_file#$HOME/}" ;;
+      *) target_display="$target_file" ;;
+    esac
+    echo "✓ Added ${dir_display} to PATH in ${target_display}"
+    configured_any=1
+  done
+
+  if [ "$user_shell" = "fish" ] || [ -d "$HOME/.config/fish" ]; then
+    fish_config="$HOME/.config/fish/config.fish"
+    fish_has_entry=0
+    if [ -f "$fish_config" ] && (grep -F -q "$INSTALL_DIR" "$fish_config" 2>/dev/null || grep -F -q "$dir_expr" "$fish_config" 2>/dev/null || grep -F -q "Added by CMX" "$fish_config" 2>/dev/null); then
+      fish_has_entry=1
+    fi
+    if [ "$fish_has_entry" -eq 0 ]; then
+      mkdir -p "$HOME/.config/fish"
+      {
+        printf '\n# Added by CMX\n'
+        printf 'if test -d "%s"\n' "$dir_expr"
+        printf '    set -gx PATH "%s" $PATH\n' "$dir_expr"
+        printf 'end\n'
+      } >> "$fish_config"
+      echo "✓ Added ${dir_display} to PATH in ~/.config/fish/config.fish"
+      configured_any=1
+    fi
+  fi
+
+  export PATH="${INSTALL_DIR}:${PATH}"
+
+  if [ "$configured_any" -eq 1 ]; then
+    echo "  Run 'source ~/.bashrc' (or restart your terminal) to use 'cmx' from anywhere."
+    echo ""
+  else
+    echo "Notice: ${dir_display} is configured in your shell profile, but not yet loaded in this session."
+    echo "  Run 'export PATH=\"${INSTALL_DIR}:\$PATH\"' or restart your terminal."
+    echo ""
+  fi
+}
+
+configure_shell_path
+
 
 if [ "${CMX_SKIP_START:-0}" != "1" ]; then
   if ! "${INSTALL_DIR}/cmx" setup --ask-connect-ready; then
