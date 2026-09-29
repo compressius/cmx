@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSfL https://compressi.us/install-testy.sh | sh
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.2.44-testy.20260929210000.6884b09c9b59}"
+VERSION="${CMX_VERSION:-v0.2.44-testy.20260929212805.0fc1e4b78429}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
@@ -281,8 +281,17 @@ if [ "${CMX_SKIP_START:-0}" != "1" ]; then
     fi
   fi
   # Install systemd user autostart service if systemd is available
-  if [ "$(uname -s)" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
+  if [ "$(uname -s)" = "Linux" ]; then
     "${INSTALL_DIR}/cmx" service install 2>/dev/null || true
+    systemd_user_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    if [ -f "${systemd_user_dir}/cmx.service" ]; then
+      mkdir -p "${systemd_user_dir}/default.target.wants"
+      ln -sf "${systemd_user_dir}/cmx.service" "${systemd_user_dir}/default.target.wants/cmx.service"
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user daemon-reload 2>/dev/null || true
+        systemctl --user start cmx 2>/dev/null || true
+      fi
+    fi
   fi
   if ! "${INSTALL_DIR}/cmx" harness verify; then
     "${INSTALL_DIR}/cmx" stop || true

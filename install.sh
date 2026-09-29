@@ -309,8 +309,17 @@ if [ "${CMX_SKIP_START:-0}" != "1" ]; then
     exit 1
   fi
   # Install systemd user autostart service if systemd is available
-  if [ "$(uname -s)" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
+  if [ "$(uname -s)" = "Linux" ]; then
     "${INSTALL_DIR}/cmx" service install 2>/dev/null || true
+    systemd_user_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    if [ -f "${systemd_user_dir}/cmx.service" ]; then
+      mkdir -p "${systemd_user_dir}/default.target.wants"
+      ln -sf "${systemd_user_dir}/cmx.service" "${systemd_user_dir}/default.target.wants/cmx.service"
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user daemon-reload 2>/dev/null || true
+        systemctl --user start cmx 2>/dev/null || true
+      fi
+    fi
   fi
   if ! "${INSTALL_DIR}/cmx" harness verify; then
     "${INSTALL_DIR}/cmx" stop || true
