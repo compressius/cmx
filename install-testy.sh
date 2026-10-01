@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSfL https://compressi.us/install-testy.sh | sh
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.3.0-testy.20260929223857.5b86a794b662}"
+VERSION="${CMX_VERSION:-v0.2.44-testy.20261001233040.941ad6d2d3fb}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
@@ -45,7 +45,25 @@ DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/cmx-${OS}-
 
 # Create temp directory
 TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t 'cmx')"
-trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
+trap 'rm -rf "$TMP_DIR"' EXIT
+trap 'exit 1' HUP INT TERM
+
+# Keep credentials out of downloader argv. Files are private from creation and
+# removed by the temporary-directory trap on success, failure, or interruption.
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  case "$GITHUB_TOKEN" in
+    *"$(printf '\r')"*|*'
+'*)
+      echo "Error: GITHUB_TOKEN must not contain line breaks" >&2
+      exit 1
+      ;;
+  esac
+  (
+    umask 077
+    printf 'Authorization: token %s\n' "$GITHUB_TOKEN" > "${TMP_DIR}/auth-header"
+    printf 'header = Authorization: token %s\n' "$GITHUB_TOKEN" > "${TMP_DIR}/wgetrc"
+  )
+fi
 
 echo "Downloading CMX ${VERSION} (${OS}/${ARCH})"
 DOWNLOAD_SUCCESS=0
@@ -61,13 +79,13 @@ curl_download() {
 
 if command -v curl >/dev/null 2>&1; then
   if [ -n "${GITHUB_TOKEN:-}" ]; then
-    curl_download -H "Authorization: token ${GITHUB_TOKEN}" -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
+    curl_download -H "@${TMP_DIR}/auth-header" -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
   else
     curl_download -o "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
   fi
 elif command -v wget >/dev/null 2>&1; then
   if [ -n "${GITHUB_TOKEN:-}" ]; then
-    wget -q --header="Authorization: token ${GITHUB_TOKEN}" -O "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
+    WGETRC="${TMP_DIR}/wgetrc" wget -q -O "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
   else
     wget -q -O "${TMP_DIR}/cmx" "$DOWNLOAD_URL" && DOWNLOAD_SUCCESS=1
   fi
@@ -92,13 +110,13 @@ CHECKSUM_SUCCESS=0
 CHECKSUM_URL="https://github.com/${REPO}/releases/download/${VERSION}/SHA256SUMS"
 if command -v curl >/dev/null 2>&1; then
   if [ -n "${GITHUB_TOKEN:-}" ]; then
-    curl -sSfL -H "Authorization: token ${GITHUB_TOKEN}" -o "${TMP_DIR}/SHA256SUMS" "$CHECKSUM_URL" && CHECKSUM_SUCCESS=1
+    curl -sSfL -H "@${TMP_DIR}/auth-header" -o "${TMP_DIR}/SHA256SUMS" "$CHECKSUM_URL" && CHECKSUM_SUCCESS=1
   else
     curl -sSfL -o "${TMP_DIR}/SHA256SUMS" "$CHECKSUM_URL" && CHECKSUM_SUCCESS=1
   fi
 elif command -v wget >/dev/null 2>&1; then
   if [ -n "${GITHUB_TOKEN:-}" ]; then
-    wget -q --header="Authorization: token ${GITHUB_TOKEN}" -O "${TMP_DIR}/SHA256SUMS" "$CHECKSUM_URL" && CHECKSUM_SUCCESS=1
+    WGETRC="${TMP_DIR}/wgetrc" wget -q -O "${TMP_DIR}/SHA256SUMS" "$CHECKSUM_URL" && CHECKSUM_SUCCESS=1
   else
     wget -q -O "${TMP_DIR}/SHA256SUMS" "$CHECKSUM_URL" && CHECKSUM_SUCCESS=1
   fi
