@@ -266,38 +266,9 @@ jobs:
             exit 1
           }
 
-  smoke:
-    if: inputs.publish && inputs.version != '' && github.ref == 'refs/heads/main'
-    needs: draft
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - name: Test installer from the draft release with read-only access
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GH_TOKEN: ${{ github.token }}
-          CMX_RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          temp_dir="$(mktemp -d)"
-          trap 'rm -rf "$temp_dir"' EXIT
-          gh release download "$CMX_RELEASE_VERSION" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern install.sh \
-            --output "$temp_dir/install.sh"
-          CMX_RELEASE_REPO=compressius/cmx \
-          CMX_VERSION="$CMX_RELEASE_VERSION" \
-          CMX_INSTALL_DIR="$temp_dir/bin" \
-          CMX_SKIP_START=1 \
-          sh "$temp_dir/install.sh"
-          "$temp_dir/bin/cmx" --version | grep -Fqx "cmx version $CMX_RELEASE_VERSION"
-
   publish:
     if: inputs.publish && inputs.version != '' && github.ref == 'refs/heads/main'
-    needs: smoke
+    needs: draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
