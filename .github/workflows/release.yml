@@ -19,7 +19,7 @@ on:
         default: false
         type: boolean
       publish_npm:
-        description: Also publish @compressius/cmx using the npm-publish environment token
+        description: Also publish @compressius/cmx through its configured npm trusted publisher
         required: false
         default: false
         type: boolean
@@ -58,8 +58,8 @@ jobs:
           CMX_PUBLISH_NPM: ${{ inputs.publish_npm }}
         run: |
           set -euo pipefail
-          [[ "$CMX_PUBLISH_NPM" != "true" || ( "$CMX_PUBLISH" == "true" && -n "$CMX_RELEASE_VERSION" ) ]] || {
-            echo "npm publication requires publish=true and a release version." >&2
+          [[ "$CMX_PUBLISH_NPM" != "true" || -n "$CMX_RELEASE_VERSION" ]] || {
+            echo "npm publication requires a release version." >&2
             exit 2
           }
           if [[ -z "$CMX_RELEASE_VERSION" ]]; then
@@ -368,13 +368,14 @@ jobs:
           git push origin HEAD:refs/heads/main
 
   publish-npm:
-    if: inputs.publish && inputs.publish_npm && inputs.version != '' && github.ref == 'refs/heads/main'
-    needs: publish
+    if: inputs.publish_npm && inputs.version != '' && github.ref == 'refs/heads/main'
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
       name: npm-publish
-    permissions: {}
+    permissions:
+      id-token: write
     steps:
       - name: Download the verified npm package archive
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -387,35 +388,29 @@ jobs:
         with:
           node-version: 24
 
-      - name: Publish @compressius/cmx with the scoped npm token
+      - name: Set up npm trusted publishing CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.19.0 --no-audit --no-fund --loglevel=silent
+          test "$(npm --version)" = "11.19.0"
+
+      - name: Publish @compressius/cmx with npm trusted publishing
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           CMX_RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          test -n "$NODE_AUTH_TOKEN" || {
-            echo "NPM_TOKEN is required in the npm-publish environment." >&2
-            exit 1
-          }
-          npm_config_file="$RUNNER_TEMP/npmrc"
-          umask 077
-          printf '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}\n' > "$npm_config_file"
-          export NPM_CONFIG_USERCONFIG="$npm_config_file"
-          trap 'rm -f "$npm_config_file"' EXIT
           tarball="$(find "$RUNNER_TEMP/npm-package" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
           test -n "$tarball"
           package_json="$(tar -xOf "$tarball" package/package.json)"
-          node -e 'const p=JSON.parse(process.argv[1]); if (p.name !== "@compressius/cmx" || p.version !== process.argv[2].replace(/^v/, "")) process.exit(1)' "$package_json" "$CMX_RELEASE_VERSION"
-          if ! npm whoami --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
-            echo "The npm publish token is invalid or lacks package write access." >&2
-            exit 1
-          fi
+          node -e 'const p=JSON.parse(process.argv[1]); if (p.name !== "@compressius/cmx" || p.version !== process.argv[2].replace(/^v/, "") || p.repository?.url !== "git+https://github.com/compressius/cmx.git") process.exit(1)' "$package_json" "$CMX_RELEASE_VERSION"
           if npm view "@compressius/cmx@${CMX_RELEASE_VERSION#v}" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
             echo "This package version is already published to npm." >&2
             exit 1
           fi
           npm publish "$tarball" --access public --tag latest --registry https://registry.npmjs.org/ --loglevel=silent --logs-max=0
-          if npm view @compressius/cmx dist-tags --json --registry https://registry.npmjs.org/ | node -e 'process.exit(JSON.parse(require("node:fs").readFileSync(0, "utf8")).nightly ? 0 : 1)'; then
-            npm dist-tag rm @compressius/cmx nightly --registry https://registry.npmjs.org/ --loglevel=silent --logs-max=0 || true
-          fi
+          published_version="$(npm view "@compressius/cmx@${CMX_RELEASE_VERSION#v}" version --registry https://registry.npmjs.org/)"
+          latest_version="$(npm view @compressius/cmx dist-tags.latest --registry https://registry.npmjs.org/)"
+          test "$published_version" = "${CMX_RELEASE_VERSION#v}"
+          test "$latest_version" = "${CMX_RELEASE_VERSION#v}"
