@@ -1,0 +1,450 @@
+name: Build and publish CMX release
+
+run-name: >-
+  ${{ inputs.version != '' && format('CMX release {0}', inputs.version) || (github.event_name == 'schedule' && 'CMX scheduled verification' || 'CMX manual verification') }}
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Optional stable release version (leave blank for verification only)
+        required: false
+        default: ''
+        type: string
+      publish:
+        description: Publish the release after building and verifying it
+        required: false
+        default: false
+        type: boolean
+      publish_npm:
+        description: Also publish @compressius/cmx using the npm-publish environment token
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: cmx-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment:
+      name: private-source
+    permissions: {}
+    steps:
+      - name: Check out private source at main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: compressius/cmx2
+          ref: main
+          path: source
+          fetch-depth: 1
+          # The read-only token is used only by checkout and is not saved in git config.
+          token: ${{ secrets.CMX_SOURCE_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Validate source checkout and release input
+        shell: bash
+        env:
+          CMX_RELEASE_VERSION: ${{ inputs.version }}
+          CMX_PUBLISH: ${{ inputs.publish }}
+          CMX_PUBLISH_NPM: ${{ inputs.publish_npm }}
+        run: |
+          set -euo pipefail
+          [[ "$CMX_PUBLISH_NPM" != "true" || ( "$CMX_PUBLISH" == "true" && -n "$CMX_RELEASE_VERSION" ) ]] || {
+            echo "npm publication requires publish=true and a release version." >&2
+            exit 2
+          }
+          if [[ -z "$CMX_RELEASE_VERSION" ]]; then
+            [[ "$CMX_PUBLISH" != "true" ]] || {
+              echo "A release version is required when publish is enabled." >&2
+              exit 2
+            }
+          else
+            [[ "$CMX_RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+              echo "Invalid release version; expected vX.Y.Z." >&2
+              exit 2
+            }
+            test -s "source/release-notes/${CMX_RELEASE_VERSION}.md" || {
+              echo "The source commit must contain sanitized release notes for this version." >&2
+              exit 1
+            }
+          fi
+          test -z "$(git -C source status --porcelain)" || {
+            echo "Source checkout is unexpectedly dirty." >&2
+            exit 1
+          }
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: source/go.mod
+          # The build cache can contain private source; public-repo caches are readable by the public.
+          cache: false
+
+      - name: Run full local verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! (cd source && ./scripts/verify.sh --local) > "$RUNNER_TEMP/verify.log" 2>&1; then
+            echo "::error::CMX verification failed. Detailed private-source logs were withheld from this public repository."
+            exit 1
+          fi
+          echo "CMX full verification passed."
+
+      - name: Set up Node.js for the npm release package
+        if: inputs.version != ''
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Build and validate release artifacts
+        if: inputs.version != ''
+        shell: bash
+        env:
+          CMX_RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! (cd source && ./scripts/build-release.sh "$CMX_RELEASE_VERSION") > "$RUNNER_TEMP/build.log" 2>&1; then
+            echo "::error::CMX release build failed. Detailed private-source logs were withheld from this public repository."
+            exit 1
+          fi
+          if ! (cd source && ./scripts/check-release-artifacts.sh "dist/$CMX_RELEASE_VERSION" "$CMX_RELEASE_VERSION") > "$RUNNER_TEMP/artifact-check.log" 2>&1; then
+            echo "::error::CMX release artifact validation failed. Detailed private-source logs were withheld from this public repository."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/release-assets"
+          cp "source/dist/$CMX_RELEASE_VERSION"/{LICENSE,README.md,SHA256SUMS,cmx-*,install.ps1,install.sh} "$RUNNER_TEMP/release-assets/"
+          cp "source/release-notes/$CMX_RELEASE_VERSION.md" "$RUNNER_TEMP/release-assets/RELEASE_NOTES.md"
+          mkdir -p "$RUNNER_TEMP/npm-package"
+          if ! npm pack --pack-destination "$RUNNER_TEMP/npm-package" "source/dist/$CMX_RELEASE_VERSION/npm" > "$RUNNER_TEMP/npm-pack.log" 2>&1; then
+            echo "::error::CMX npm package archive creation failed. Detailed private-source logs were withheld from this public repository."
+            exit 1
+          fi
+          npm_tarball="$(find "$RUNNER_TEMP/npm-package" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+          test -n "$npm_tarball"
+          package_json="$(tar -xOf "$npm_tarball" package/package.json)"
+          node -e 'const p=JSON.parse(process.argv[1]); if (p.name !== "@compressius/cmx" || p.version !== process.argv[2].replace(/^v/, "")) process.exit(1)' "$package_json" "$CMX_RELEASE_VERSION"
+          (
+            cd "$RUNNER_TEMP/release-assets"
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Store public release files for the publish jobs
+        if: inputs.version != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cmx-release-files
+          path: ${{ runner.temp }}/release-assets
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Store npm package for the optional npm publish job
+        if: inputs.version != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cmx-npm-package
+          path: ${{ runner.temp }}/npm-package/*.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  draft:
+    if: inputs.publish && inputs.version != '' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the public release repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download and validate release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cmx-release-files
+          path: ${{ runner.temp }}/release-assets
+
+      - name: Validate public repository history and asset set
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CMX_RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          expected_assets="$(
+            printf '%s\n' \
+              LICENSE SHA256SUMS \
+              cmx-darwin-amd64 cmx-darwin-arm64 \
+              cmx-linux-amd64 cmx-linux-arm64 \
+              cmx-setup-windows-amd64.exe cmx-setup-windows-arm64.exe \
+              cmx-windows-amd64.exe cmx-windows-arm64.exe \
+              install.ps1 install.sh | LC_ALL=C sort
+          )"
+          release_dir="$RUNNER_TEMP/release-assets"
+          actual_files="$(find "$release_dir" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
+          expected_files="$(printf '%s\n' "$expected_assets" README.md RELEASE_NOTES.md | LC_ALL=C sort)"
+          [ "$actual_files" = "$expected_files" ] || {
+            echo "Unexpected release files; refusing to publish." >&2
+            exit 1
+          }
+          (
+            cd "$release_dir"
+            sha256sum -c SHA256SUMS
+          )
+          if gh release view "$CMX_RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $CMX_RELEASE_VERSION already exists; refusing to replace it." >&2
+            exit 1
+          fi
+          if git show-ref --verify --quiet "refs/tags/$CMX_RELEASE_VERSION"; then
+            echo "Tag $CMX_RELEASE_VERSION already exists; refusing to reuse it." >&2
+            exit 1
+          fi
+          if latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null)"; then
+            newest="$(printf '%s\n%s\n' "$latest" "$CMX_RELEASE_VERSION" | sort -V | tail -n 1)"
+            if [ "$newest" != "$CMX_RELEASE_VERSION" ] || [ "$latest" = "$CMX_RELEASE_VERSION" ]; then
+              echo "Release version must be newer than current stable release $latest." >&2
+              exit 1
+            fi
+          fi
+          while IFS= read -r commit; do
+            files="$(git ls-tree -r --name-only "$commit")"
+            if printf '%s\n' "$files" | grep -Ev '^(\.github/workflows/release\.yml|LICENSE|README\.md|install(-testy|-nightly)?\.sh|install(-nightly)?\.ps1)$' | grep -q .; then
+              echo "Public repository history contains unexpected files; refusing to publish." >&2
+              exit 1
+            fi
+          done < <(git rev-list --all)
+
+      - name: Create and verify a draft GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CMX_RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          release_dir="$RUNNER_TEMP/release-assets"
+          gh release create "$CMX_RELEASE_VERSION" \
+            "$release_dir"/cmx-* \
+            "$release_dir/install.ps1" \
+            "$release_dir/install.sh" \
+            "$release_dir/LICENSE" \
+            "$release_dir/SHA256SUMS" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "CMX $CMX_RELEASE_VERSION" \
+            --draft \
+            --notes-file "$release_dir/RELEASE_NOTES.md"
+
+          expected_assets="$(
+            printf '%s\n' \
+              LICENSE SHA256SUMS \
+              cmx-darwin-amd64 cmx-darwin-arm64 \
+              cmx-linux-amd64 cmx-linux-arm64 \
+              cmx-setup-windows-amd64.exe cmx-setup-windows-arm64.exe \
+              cmx-windows-amd64.exe cmx-windows-arm64.exe \
+              install.ps1 install.sh | LC_ALL=C sort
+          )"
+          actual_assets="$(gh release view "$CMX_RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | sort | join("\n")')"
+          [ "$actual_assets" = "$expected_assets" ] || {
+            echo "Draft release asset verification failed; leaving it unpublished." >&2
+            exit 1
+          }
+          is_draft="$(gh release view "$CMX_RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+          [ "$is_draft" = true ] || {
+            echo "Draft release state verification failed." >&2
+            exit 1
+          }
+
+  smoke:
+    if: inputs.publish && inputs.version != '' && github.ref == 'refs/heads/main'
+    needs: draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Test installer from the draft release with read-only access
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          CMX_RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          temp_dir="$(mktemp -d)"
+          trap 'rm -rf "$temp_dir"' EXIT
+          gh release download "$CMX_RELEASE_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern install.sh \
+            --output "$temp_dir/install.sh"
+          CMX_RELEASE_REPO=compressius/cmx \
+          CMX_VERSION="$CMX_RELEASE_VERSION" \
+          CMX_INSTALL_DIR="$temp_dir/bin" \
+          CMX_SKIP_START=1 \
+          sh "$temp_dir/install.sh"
+          "$temp_dir/bin/cmx" --version | grep -Fqx "cmx version $CMX_RELEASE_VERSION"
+
+  publish:
+    if: inputs.publish && inputs.version != '' && github.ref == 'refs/heads/main'
+    needs: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the verified release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CMX_RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          gh release edit "$CMX_RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          is_draft="$(gh release view "$CMX_RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+          is_prerelease="$(gh release view "$CMX_RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)"
+          [ "$is_draft" = false ] && [ "$is_prerelease" = false ] || {
+            echo "Release publication state verification failed." >&2
+            exit 1
+          }
+
+  smoke-live:
+    if: inputs.publish && inputs.version != '' && github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Test anonymous installer from the published release
+        shell: bash
+        env:
+          CMX_RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          temp_dir="$(mktemp -d)"
+          trap 'rm -rf "$temp_dir"' EXIT
+          curl --fail --silent --show-error --location \
+            "https://github.com/compressius/cmx/releases/download/${CMX_RELEASE_VERSION}/install.sh" \
+            --output "$temp_dir/install.sh"
+          env -u GITHUB_TOKEN -u GH_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN \
+            CMX_RELEASE_REPO=compressius/cmx \
+            CMX_VERSION="$CMX_RELEASE_VERSION" \
+            CMX_INSTALL_DIR="$temp_dir/bin" \
+            CMX_SKIP_START=1 \
+            sh "$temp_dir/install.sh"
+          "$temp_dir/bin/cmx" --version | grep -Fqx "cmx version $CMX_RELEASE_VERSION"
+
+  sync-installers:
+    if: inputs.publish && inputs.version != '' && github.ref == 'refs/heads/main'
+    needs: [publish, smoke-live]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the public release repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download verified public installer files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cmx-release-files
+          path: ${{ runner.temp }}/release-assets
+
+      - name: Update stable installer files on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="$RUNNER_TEMP/release-assets"
+          test -f "$release_dir/install.sh"
+          test -f "$release_dir/install.ps1"
+          test -f "$release_dir/README.md"
+          test -f "$release_dir/LICENSE"
+          test -z "$(git status --porcelain)" || {
+            echo "Public checkout is unexpectedly dirty; refusing to update installers." >&2
+            exit 1
+          }
+          testy_before="$(sha256sum install-testy.sh | cut -d' ' -f1)"
+          nightly_before="$(sha256sum install-nightly.sh | cut -d' ' -f1)"
+          cp "$release_dir/install.sh" install.sh
+          cp "$release_dir/install.ps1" install.ps1
+          cp "$release_dir/README.md" README.md
+          cp "$release_dir/LICENSE" LICENSE
+          test "$testy_before" = "$(sha256sum install-testy.sh | cut -d' ' -f1)"
+          test "$nightly_before" = "$(sha256sum install-nightly.sh | cut -d' ' -f1)"
+          git diff --check
+          git add -- install.sh install.ps1 README.md LICENSE
+          if git diff --cached --quiet; then
+            echo "Stable installer files already match this release."
+            exit 0
+          fi
+          git -c user.name='CMX Releases' \
+            -c user.email='releases@compressi.us' \
+            commit -m 'Update public installer and documentation'
+          git push origin HEAD:refs/heads/main
+
+  publish-npm:
+    if: inputs.publish && inputs.publish_npm && inputs.version != '' && github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: npm-publish
+    permissions: {}
+    steps:
+      - name: Download the verified npm package archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cmx-npm-package
+          path: ${{ runner.temp }}/npm-package
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Publish @compressius/cmx with the scoped npm token
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CMX_RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test -n "$NODE_AUTH_TOKEN" || {
+            echo "NPM_TOKEN is required in the npm-publish environment." >&2
+            exit 1
+          }
+          npm_config_file="$RUNNER_TEMP/npmrc"
+          umask 077
+          printf '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}\n' > "$npm_config_file"
+          export NPM_CONFIG_USERCONFIG="$npm_config_file"
+          trap 'rm -f "$npm_config_file"' EXIT
+          tarball="$(find "$RUNNER_TEMP/npm-package" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+          test -n "$tarball"
+          package_json="$(tar -xOf "$tarball" package/package.json)"
+          node -e 'const p=JSON.parse(process.argv[1]); if (p.name !== "@compressius/cmx" || p.version !== process.argv[2].replace(/^v/, "")) process.exit(1)' "$package_json" "$CMX_RELEASE_VERSION"
+          if ! npm whoami --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+            echo "The npm publish token is invalid or lacks package write access." >&2
+            exit 1
+          fi
+          if npm view "@compressius/cmx@${CMX_RELEASE_VERSION#v}" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+            echo "This package version is already published to npm." >&2
+            exit 1
+          fi
+          npm publish "$tarball" --access public --tag latest --registry https://registry.npmjs.org/ --loglevel=silent --logs-max=0
+          if npm view @compressius/cmx dist-tags --json --registry https://registry.npmjs.org/ | node -e 'process.exit(JSON.parse(require("node:fs").readFileSync(0, "utf8")).nightly ? 0 : 1)'; then
+            npm dist-tag rm @compressius/cmx nightly --registry https://registry.npmjs.org/ --loglevel=silent --logs-max=0 || true
+          fi
