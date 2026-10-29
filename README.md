@@ -4,7 +4,15 @@ CMX is a local context-compression gateway for coding agents, with a terminal in
 
 ## Install
 
-Install CMX with npm or pnpm (Node.js 18+):
+Install the latest stable binary release with the official installer:
+
+```sh
+curl -fsSL https://compressi.us/install.sh | sh
+```
+
+The installer downloads the matching release binary and verifies its SHA-256 checksum. The current stable release is v0.3.7.
+
+You can also install CMX with npm or pnpm (Node.js 18+):
 
 ```sh
 npm install --global @compressius/cmx
@@ -16,7 +24,7 @@ After installation, run `cmx setup --ask-connect-ready` in an interactive termin
 
 The package supports Windows, macOS, and Linux on x64 and ARM64. It downloads the matching release binary and verifies its SHA-256 checksum. Documentation and your dashboard are at [compressi.us](https://compressi.us).
 
-The `latest` npm tag tracks stable CMX releases. Each package downloads the matching release binary and verifies its SHA-256 before exposing `cmx`.
+The npm package is published separately and can lag behind the latest GitHub stable release. Check the published npm version if you choose this installation method. Each package downloads its matching release binary and verifies its SHA-256 before exposing `cmx`.
 
 CMX is distributed under the Proprietary Gratis License. See `LICENSE` for the exact terms.
 
