@@ -10,7 +10,7 @@ Install the latest stable binary release with the official installer:
 curl -fsSL https://compressi.us/install.sh | sh
 ```
 
-The installer downloads the matching release binary and verifies its SHA-256 checksum. The current stable release is v0.3.8.
+The installer downloads the matching release binary and verifies its SHA-256 checksum. The current stable release is v0.3.9.
 
 You can also install CMX with npm or pnpm (Node.js 18+):
 
