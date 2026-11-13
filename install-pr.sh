@@ -5,7 +5,7 @@ set -e
 # Usage: curl -sSfL https://compressi.us/install-pr.sh | sh
 
 REPO="${CMX_RELEASE_REPO:-compressius/cmx}"
-VERSION="${CMX_VERSION:-v0.3.29-pr.20261111215308.88fd9efa7dd0}"
+VERSION="${CMX_VERSION:-v0.3.30-pr.20261113102556.767e022cf778}"
 
 if [ -n "${CMX_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$CMX_INSTALL_DIR"
